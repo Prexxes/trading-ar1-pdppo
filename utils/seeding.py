@@ -9,7 +9,11 @@ import torch
 
 
 def seed_everything(seed: int) -> None:
-    """Seeds Python, NumPy, and PyTorch."""
+    """Seed Python, NumPy, and PyTorch RNGs.
+
+    Args:
+        seed: Seed value used for all supported random number generators.
+    """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)

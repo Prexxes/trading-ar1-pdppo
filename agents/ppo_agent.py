@@ -16,7 +16,24 @@ from buffers.rollout_buffer import RolloutBuffer
 
 @dataclass(slots=True)
 class PPOConfig:
-    """Configuration for PPO training and optimization."""
+    """Configuration for PPO training and optimization.
+
+    Attributes:
+        obs_dim: Dimension of the observation vector.
+        action_dim: Number of discrete actions.
+        actor_lr: Learning rate for the policy network.
+        critic_lr: Learning rate for the value network.
+        gamma: Discount factor.
+        gae_lambda: Lambda parameter for generalized advantage estimation.
+        clip_epsilon: PPO clipping threshold.
+        entropy_coef: Entropy regularization weight.
+        value_coef: Weight applied to the critic loss.
+        update_epochs: Number of optimization passes per rollout.
+        minibatch_size: Number of samples per optimization minibatch.
+        rollout_steps: Number of environment steps collected per rollout.
+        max_grad_norm: Gradient clipping threshold.
+        device: PyTorch device identifier.
+    """
 
     obs_dim: int
     action_dim: int
@@ -38,6 +55,11 @@ class PPOAgent:
     """Masked-action PPO agent with actor-critic networks."""
 
     def __init__(self, config: PPOConfig) -> None:
+        """Initialize the PPO agent and its optimizers.
+
+        Args:
+            config: Training and model hyperparameters.
+        """
         self.config = config
         self.device = torch.device(config.device)
         self.actor = ActorNetwork(config.obs_dim, config.action_dim).to(self.device)
@@ -51,7 +73,17 @@ class PPOAgent:
         action_mask: np.ndarray,
         deterministic: bool = False,
     ) -> tuple[int, float, float]:
-        """Selects an action using the masked policy."""
+        """Select an action from the current policy.
+
+        Args:
+            observation: Current environment observation.
+            action_mask: Binary mask indicating which actions are valid.
+            deterministic: Whether to choose the argmax action instead of sampling.
+
+        Returns:
+            A tuple containing the selected action, its log probability, and the
+            estimated state value.
+        """
         observation_tensor = torch.as_tensor(
             observation,
             dtype=torch.float32,
@@ -74,7 +106,15 @@ class PPOAgent:
         return int(action.item()), float(log_prob.item()), float(value.item())
 
     def collect_rollout(self, env) -> tuple[RolloutBuffer, list[float]]:
-        """Collects one rollout of on-policy experience."""
+        """Collect one rollout of on-policy experience.
+
+        Args:
+            env: Trading environment used for data collection.
+
+        Returns:
+            A rollout buffer with collected transitions and a list of completed
+            episode returns observed during the rollout.
+        """
         buffer = RolloutBuffer()
         episode_returns: list[float] = []
         observation, info = env.reset()
@@ -110,7 +150,14 @@ class PPOAgent:
         return buffer, episode_returns
 
     def update(self, buffer: RolloutBuffer) -> dict[str, float]:
-        """Runs PPO updates for a collected rollout."""
+        """Run PPO optimization on a collected rollout.
+
+        Args:
+            buffer: Rollout data collected from the environment.
+
+        Returns:
+            Final actor and critic losses from the last processed minibatch.
+        """
         batch = buffer.as_tensors(self.device)
         advantages, returns = self._compute_gae(
             rewards=batch["rewards"],
@@ -155,6 +202,19 @@ class PPOAgent:
         advantages: torch.Tensor,
         returns: torch.Tensor,
     ) -> tuple[float, float]:
+        """Update actor and critic parameters on one minibatch.
+
+        Args:
+            observations: Batched observations.
+            action_masks: Batched action masks.
+            actions: Actions taken in the rollout.
+            old_log_probs: Log probabilities recorded during data collection.
+            advantages: Advantage estimates for the actor objective.
+            returns: Return targets for the critic objective.
+
+        Returns:
+            The scalar actor loss and critic loss.
+        """
         policy_output = self.actor(observations, action_masks)
         new_log_probs = policy_output.distribution.log_prob(actions)
         entropy = policy_output.distribution.entropy().mean()
@@ -190,11 +250,23 @@ class PPOAgent:
         dones: torch.Tensor,
         next_observations: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Compute generalized advantage estimates and returns.
+
+        Args:
+            rewards: Reward tensor for the rollout.
+            values: Critic value estimates for each observation.
+            dones: Binary indicators for terminal or truncated transitions.
+            next_observations: Successor observations used to bootstrap values.
+
+        Returns:
+            A tuple containing advantages and return targets.
+        """
         with torch.no_grad():
             next_values = self.critic(next_observations)
 
         advantages = torch.zeros_like(rewards)
         gae = torch.zeros(1, device=self.device, dtype=torch.float32)
+        # Walk the trajectory backward to accumulate discounted TD residuals.
         for index in reversed(range(rewards.shape[0])):
             mask = 1.0 - dones[index]
             delta = rewards[index] + self.config.gamma * next_values[index] * mask - values[index]
@@ -205,7 +277,11 @@ class PPOAgent:
         return advantages, returns
 
     def save(self, path: str | Path) -> None:
-        """Saves model and optimizer state."""
+        """Save model and optimizer state to disk.
+
+        Args:
+            path: Output file path for the serialized checkpoint.
+        """
         torch.save(
             {
                 "config": asdict(self.config),

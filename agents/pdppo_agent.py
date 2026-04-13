@@ -16,7 +16,25 @@ from buffers.rollout_buffer import RolloutBuffer
 
 @dataclass(slots=True)
 class PDPPOConfig:
-    """Configuration for PDPPO training and optimization."""
+    """Configuration for PDPPO training and optimization.
+
+    Attributes:
+        obs_dim: Dimension of the observation vector.
+        action_dim: Number of discrete actions.
+        actor_lr: Learning rate for the policy network.
+        critic_state_lr: Learning rate for the state critic.
+        critic_post_lr: Learning rate for the post-decision critic.
+        gamma: Discount factor.
+        gae_lambda: Lambda parameter for generalized advantage estimation.
+        clip_epsilon: PPO clipping threshold.
+        entropy_coef: Entropy regularization weight.
+        value_coef: Weight applied to both critic losses.
+        update_epochs: Number of optimization passes per rollout.
+        minibatch_size: Number of samples per optimization minibatch.
+        rollout_steps: Number of environment steps collected per rollout.
+        max_grad_norm: Gradient clipping threshold.
+        device: PyTorch device identifier.
+    """
 
     obs_dim: int
     action_dim: int
@@ -39,6 +57,11 @@ class PDPPOAgent:
     """PDPPO agent with a state critic and a post-decision critic."""
 
     def __init__(self, config: PDPPOConfig) -> None:
+        """Initialize the PDPPO agent and its optimizers.
+
+        Args:
+            config: Training and model hyperparameters.
+        """
         self.config = config
         self.device = torch.device(config.device)
         self.actor = ActorNetwork(config.obs_dim, config.action_dim).to(self.device)
@@ -54,7 +77,17 @@ class PDPPOAgent:
         action_mask: np.ndarray,
         deterministic: bool = False,
     ) -> tuple[int, float, float]:
-        """Selects an action using the masked actor."""
+        """Select an action from the masked policy.
+
+        Args:
+            observation: Current environment observation.
+            action_mask: Binary mask indicating which actions are valid.
+            deterministic: Whether to choose the argmax action instead of sampling.
+
+        Returns:
+            A tuple containing the selected action, its log probability, and the
+            estimated state value.
+        """
         observation_tensor = torch.as_tensor(
             observation,
             dtype=torch.float32,
@@ -77,7 +110,15 @@ class PDPPOAgent:
         return int(action.item()), float(log_prob.item()), float(state_value.item())
 
     def collect_rollout(self, env) -> tuple[RolloutBuffer, list[float]]:
-        """Collects experience including post-decision states."""
+        """Collect a rollout including post-decision states.
+
+        Args:
+            env: Trading environment used for data collection.
+
+        Returns:
+            A rollout buffer with transitions and a list of completed episode
+            returns observed during the rollout.
+        """
         buffer = RolloutBuffer()
         episode_returns: list[float] = []
         observation, info = env.reset()
@@ -88,6 +129,7 @@ class PDPPOAgent:
             action, log_prob, state_value = self.select_action(observation, action_mask)
             post_observation, _ = env.get_post_decision_state(action)
             with torch.no_grad():
+                # The post-decision critic evaluates the deterministic state after trading.
                 post_value = self.critic_post(
                     torch.as_tensor(post_observation, dtype=torch.float32, device=self.device).unsqueeze(0)
                 )
@@ -123,9 +165,18 @@ class PDPPOAgent:
         return buffer, episode_returns
 
     def update(self, buffer: RolloutBuffer) -> dict[str, float]:
-        """Runs PDPPO updates."""
+        """Run PDPPO optimization on a collected rollout.
+
+        Args:
+            buffer: Rollout data collected from the environment.
+
+        Returns:
+            Final actor, state-critic, and post-critic losses from the last
+            processed minibatch.
+        """
         batch = buffer.as_tensors(self.device)
         adv_state, state_returns, post_targets, adv_post = self._compute_targets(batch)
+        # Use the stronger of both advantage signals for the actor update.
         adv_actor = torch.maximum(adv_state, adv_post)
         adv_actor = (adv_actor - adv_actor.mean()) / (adv_actor.std() + 1e-8)
 
@@ -163,11 +214,21 @@ class PDPPOAgent:
         self,
         batch: dict[str, torch.Tensor],
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Compute critic targets and actor advantage estimates.
+
+        Args:
+            batch: Tensorized rollout data.
+
+        Returns:
+            State advantages, state-value returns, post-decision targets, and
+            post-decision advantages.
+        """
         with torch.no_grad():
             next_state_values = self.critic_state(batch["next_observations"])
 
         adv_state = torch.zeros_like(batch["rewards"])
         gae = torch.zeros(1, device=self.device, dtype=torch.float32)
+        # Backward recursion computes the state-value GAE targets.
         for index in reversed(range(batch["rewards"].shape[0])):
             mask = 1.0 - batch["dones"][index]
             delta = (
@@ -198,6 +259,21 @@ class PDPPOAgent:
         state_returns: torch.Tensor,
         post_targets: torch.Tensor,
     ) -> tuple[float, float, float]:
+        """Update actor and both critics on one minibatch.
+
+        Args:
+            observations: Batched current observations.
+            post_observations: Batched post-decision observations.
+            action_masks: Batched action masks.
+            actions: Actions taken in the rollout.
+            old_log_probs: Log probabilities recorded during data collection.
+            actor_advantages: Advantage signal used for the actor objective.
+            state_returns: Return targets for the state critic.
+            post_targets: Regression targets for the post-decision critic.
+
+        Returns:
+            The scalar actor, state-critic, and post-critic losses.
+        """
         policy_output = self.actor(observations, action_masks)
         new_log_probs = policy_output.distribution.log_prob(actions)
         entropy = policy_output.distribution.entropy().mean()
@@ -233,7 +309,11 @@ class PDPPOAgent:
         return float(actor_loss.item()), float(state_loss.item()), float(post_loss.item())
 
     def save(self, path: str | Path) -> None:
-        """Saves model and optimizer state."""
+        """Save model and optimizer state to disk.
+
+        Args:
+            path: Output file path for the serialized checkpoint.
+        """
         torch.save(
             {
                 "config": asdict(self.config),

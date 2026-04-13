@@ -23,7 +23,20 @@ def train_pdppo(
     output_dir: Path,
     seed: int,
 ) -> dict[str, float]:
-    """Runs PDPPO training, evaluation, logging, and checkpointing."""
+    """Run PDPPO training, evaluation, logging, and checkpointing.
+
+    Args:
+        env_config: Environment configuration used for training and evaluation.
+        agent_config: PDPPO hyperparameters and model configuration.
+        total_updates: Number of rollout/update iterations to run.
+        eval_interval: Frequency of evaluation in updates.
+        eval_episodes: Number of evaluation episodes per evaluation phase.
+        output_dir: Directory used for logs and checkpoints.
+        seed: Global random seed.
+
+    Returns:
+        Metrics collected during the final training update.
+    """
     seed_everything(seed)
     train_env = TradingAr1Env(env_config)
     eval_env = TradingAr1Env(env_config)
@@ -60,6 +73,7 @@ def train_pdppo(
         }
 
         if update % eval_interval == 0 or update == total_updates:
+            # Evaluate periodically and keep the best-performing checkpoint.
             evaluation = evaluate_agent(agent, eval_env, episodes=eval_episodes)
             metrics["eval_return_mean"] = evaluation["mean_return"]
             metrics["eval_return_std"] = evaluation["std_return"]
@@ -76,7 +90,11 @@ def train_pdppo(
 
 
 def parse_args() -> argparse.Namespace:
-    """Parses command-line arguments."""
+    """Parse command-line arguments for PDPPO training.
+
+    Returns:
+        Parsed command-line namespace.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=Path("runs/pdppo"))
     parser.add_argument("--seed", type=int, default=7)
@@ -97,7 +115,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    """Runs PDPPO training from the command line."""
+    """Run PDPPO training from the command line."""
     args = parse_args()
     env_config = TradingAr1EnvConfig(
         seed=args.seed,

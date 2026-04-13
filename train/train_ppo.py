@@ -14,7 +14,14 @@ from utils.seeding import seed_everything
 
 
 def create_training_paths(root: Path) -> TrainingPaths:
-    """Creates directories for a training run."""
+    """Create directories and file paths for a training run.
+
+    Args:
+        root: Root directory of the training run.
+
+    Returns:
+        A ``TrainingPaths`` object with resolved locations.
+    """
     checkpoint_dir = ensure_directory(root / "checkpoints")
     return TrainingPaths(
         root=ensure_directory(root),
@@ -33,7 +40,20 @@ def train_ppo(
     output_dir: Path,
     seed: int,
 ) -> dict[str, float]:
-    """Runs PPO training, evaluation, logging, and checkpointing."""
+    """Run PPO training, evaluation, logging, and checkpointing.
+
+    Args:
+        env_config: Environment configuration used for training and evaluation.
+        agent_config: PPO hyperparameters and model configuration.
+        total_updates: Number of rollout/update iterations to run.
+        eval_interval: Frequency of evaluation in updates.
+        eval_episodes: Number of evaluation episodes per evaluation phase.
+        output_dir: Directory used for logs and checkpoints.
+        seed: Global random seed.
+
+    Returns:
+        Metrics collected during the final training update.
+    """
     seed_everything(seed)
     train_env = TradingAr1Env(env_config)
     eval_env = TradingAr1Env(env_config)
@@ -68,6 +88,7 @@ def train_ppo(
         }
 
         if update % eval_interval == 0 or update == total_updates:
+            # Evaluate periodically and keep the best-performing checkpoint.
             evaluation = evaluate_agent(agent, eval_env, episodes=eval_episodes)
             metrics["eval_return_mean"] = evaluation["mean_return"]
             metrics["eval_return_std"] = evaluation["std_return"]
@@ -84,7 +105,11 @@ def train_ppo(
 
 
 def parse_args() -> argparse.Namespace:
-    """Parses command-line arguments."""
+    """Parse command-line arguments for PPO training.
+
+    Returns:
+        Parsed command-line namespace.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=Path("runs/ppo"))
     parser.add_argument("--seed", type=int, default=7)
@@ -98,7 +123,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    """Runs PPO training from the command line."""
+    """Run PPO training from the command line."""
     args = parse_args()
     env_config = TradingAr1EnvConfig(seed=args.seed)
     agent_config = PPOConfig(

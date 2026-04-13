@@ -14,7 +14,24 @@ PostRewardMode = Literal["none", "cash_interest", "cash_interest_and_tc"]
 
 @dataclass(slots=True)
 class TradingAr1EnvConfig:
-    """Configuration for the trading environment."""
+    """Configuration for the trading environment.
+
+    Attributes:
+        episode_length: Number of trading days per episode.
+        initial_cash: Initial cash balance.
+        initial_inventory: Initial number of units held.
+        max_inventory: Maximum allowed inventory level.
+        max_trade_per_day: Optional cap on absolute daily trade size.
+        initial_price: Initial price when ``initial_log_price`` is not provided.
+        initial_log_price: Optional initial log-price overriding ``initial_price``.
+        mu: Long-run mean of the AR(1) log-price process.
+        phi: Persistence of the AR(1) log-price process.
+        sigma: Innovation standard deviation of the AR(1) process.
+        post_reward_mode: Reward decomposition mode.
+        risk_free_rate_annual: Annualized risk-free cash return.
+        transaction_cost_rate: Proportional transaction cost rate.
+        seed: Optional random seed for environment sampling.
+    """
 
     episode_length: int = 365
     initial_cash: float = 1000.0
@@ -38,6 +55,12 @@ class TradingAr1Env(gym.Env[np.ndarray, int]):
     metadata = {"render_modes": []}
 
     def __init__(self, config: TradingAr1EnvConfig | None = None) -> None:
+        """Initialize the trading environment.
+
+        Args:
+            config: Optional environment configuration. Defaults to
+                ``TradingAr1EnvConfig()``.
+        """
         self.config = config or TradingAr1EnvConfig()
         self._validate_config()
 
@@ -58,6 +81,7 @@ class TradingAr1Env(gym.Env[np.ndarray, int]):
 
     @property
     def _initial_log_price(self) -> float:
+        """Return the initial log-price implied by the configuration."""
         return (
             float(self.config.initial_log_price)
             if self.config.initial_log_price is not None
@@ -66,9 +90,15 @@ class TradingAr1Env(gym.Env[np.ndarray, int]):
 
     @property
     def daily_risk_free_rate(self) -> float:
+        """Convert the annual risk-free rate into a daily rate."""
         return (1.0 + self.config.risk_free_rate_annual) ** (1.0 / 365.0) - 1.0
 
     def _validate_config(self) -> None:
+        """Validate environment configuration values.
+
+        Raises:
+            ValueError: If any configuration value is inconsistent or invalid.
+        """
         if self.config.episode_length <= 0:
             raise ValueError("episode_length must be positive.")
         if self.config.initial_cash <= 0.0:
@@ -88,6 +118,15 @@ class TradingAr1Env(gym.Env[np.ndarray, int]):
         seed: int | None = None,
         options: dict[str, Any] | None = None,
     ) -> tuple[np.ndarray, dict[str, Any]]:
+        """Reset the environment to the initial state.
+
+        Args:
+            seed: Optional seed used to reinitialize the environment RNG.
+            options: Unused Gymnasium reset options.
+
+        Returns:
+            The initial observation and an info dictionary.
+        """
         del options
         if seed is not None:
             self.np_random, _ = gym.utils.seeding.np_random(seed)
@@ -116,6 +155,18 @@ class TradingAr1Env(gym.Env[np.ndarray, int]):
         )
 
     def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
+        """Advance the environment by one trading step.
+
+        Args:
+            action: Encoded trade action.
+
+        Returns:
+            The next observation, total reward, termination flag, truncation
+            flag, and an info dictionary.
+
+        Raises:
+            RuntimeError: If reward decomposition does not match portfolio dynamics.
+        """
         requested_action = int(action)
         requested_trade = self._decode_action(requested_action)
         is_valid = self._is_valid_trade(requested_trade, self.inventory, self.cash, self.price)
@@ -171,7 +222,11 @@ class TradingAr1Env(gym.Env[np.ndarray, int]):
         return observation, total_reward, terminated, truncated, info
 
     def get_action_mask(self) -> np.ndarray:
-        """Returns a binary validity mask for the current action space."""
+        """Return a binary validity mask for the current action space.
+
+        Returns:
+            A binary array whose entries are ``1`` for valid actions.
+        """
         mask = np.zeros(self.action_space.n, dtype=np.int8)
         for action_index in range(self.action_space.n):
             trade = self._decode_action(action_index)
@@ -181,7 +236,14 @@ class TradingAr1Env(gym.Env[np.ndarray, int]):
         return mask
 
     def get_post_decision_state(self, action_index: int) -> tuple[np.ndarray, float]:
-        """Computes the post-decision observation and reward without mutation."""
+        """Compute the post-decision state without mutating the environment.
+
+        Args:
+            action_index: Encoded trade action.
+
+        Returns:
+            The post-decision observation and deterministic post-decision reward.
+        """
         requested_trade = self._decode_action(int(action_index))
         is_valid = self._is_valid_trade(requested_trade, self.inventory, self.cash, self.price)
         executed_trade = requested_trade if is_valid else 0
@@ -197,6 +259,14 @@ class TradingAr1Env(gym.Env[np.ndarray, int]):
         return post_observation, self._compute_post_reward(post_cash, transaction_cost)
 
     def _sample_next_log_price(self, current_log_price: float) -> float:
+        """Sample the next log-price from the AR(1) dynamics.
+
+        Args:
+            current_log_price: Current log-price state.
+
+        Returns:
+            The next sampled log-price.
+        """
         epsilon = self.np_random.normal()
         return float(
             self.config.mu
@@ -216,6 +286,21 @@ class TradingAr1Env(gym.Env[np.ndarray, int]):
         transaction_cost: float,
         cash_interest: float,
     ) -> dict[str, Any]:
+        """Build the Gymnasium info dictionary for the current state.
+
+        Args:
+            requested_action: Action index originally requested by the policy.
+            executed_action: Action index executed after validity checks.
+            invalid_action: Whether the requested action was invalid.
+            action_mask: Binary validity mask for the next decision step.
+            post_reward: Deterministic post-decision reward component.
+            stochastic_reward: Reward contribution from the price evolution.
+            transaction_cost: Transaction cost paid for the trade.
+            cash_interest: Interest credited on the cash position.
+
+        Returns:
+            A dictionary with diagnostics for the transition.
+        """
         return {
             "price": float(self.price),
             "log_price": float(self.log_price),
@@ -239,9 +324,29 @@ class TradingAr1Env(gym.Env[np.ndarray, int]):
         price: float,
         transaction_cost: float,
     ) -> float:
+        """Compute cash after executing a trade.
+
+        Args:
+            cash: Cash balance before trading.
+            trade: Signed trade quantity.
+            price: Current asset price.
+            transaction_cost: Transaction cost paid for the trade.
+
+        Returns:
+            The resulting cash balance.
+        """
         return float(cash - trade * price - transaction_cost)
 
     def _compute_post_reward(self, post_cash: float, transaction_cost: float) -> float:
+        """Compute the deterministic post-decision reward component.
+
+        Args:
+            post_cash: Cash balance immediately after the trade.
+            transaction_cost: Transaction cost paid for the trade.
+
+        Returns:
+            The deterministic reward contribution configured for the environment.
+        """
         if self.config.post_reward_mode == "none":
             return 0.0
         cash_interest = post_cash * self.daily_risk_free_rate
@@ -250,17 +355,53 @@ class TradingAr1Env(gym.Env[np.ndarray, int]):
         return float(-transaction_cost + cash_interest)
 
     def _transaction_cost(self, trade: int, price: float) -> float:
+        """Compute proportional transaction costs for a trade.
+
+        Args:
+            trade: Signed trade quantity.
+            price: Current asset price.
+
+        Returns:
+            The transaction cost charged for the trade.
+        """
         if self.config.post_reward_mode != "cash_interest_and_tc":
             return 0.0
         return float(self.config.transaction_cost_rate * abs(trade) * price)
 
     def _decode_action(self, action_index: int) -> int:
+        """Convert an action index into a signed trade quantity.
+
+        Args:
+            action_index: Encoded action index.
+
+        Returns:
+            The decoded signed trade.
+        """
         return int(action_index - self.config.max_inventory)
 
     def _encode_trade(self, trade: int) -> int:
+        """Convert a signed trade quantity into an action index.
+
+        Args:
+            trade: Signed trade quantity.
+
+        Returns:
+            The encoded action index.
+        """
         return int(trade + self.config.max_inventory)
 
     def _is_valid_trade(self, trade: int, inventory: int, cash: float, price: float) -> bool:
+        """Check whether a trade respects inventory and cash constraints.
+
+        Args:
+            trade: Signed trade quantity.
+            inventory: Current inventory level.
+            cash: Current cash balance.
+            price: Current asset price.
+
+        Returns:
+            ``True`` if the trade is feasible, otherwise ``False``.
+        """
         next_inventory = inventory + trade
         if next_inventory < 0 or next_inventory > self.config.max_inventory:
             return False
@@ -278,7 +419,19 @@ class TradingAr1Env(gym.Env[np.ndarray, int]):
         cash: float,
         day: int,
     ) -> np.ndarray:
+        """Build the normalized observation vector.
+
+        Args:
+            log_price: Current log-price.
+            inventory: Current inventory level.
+            cash: Current cash balance.
+            day: Current day index within the episode.
+
+        Returns:
+            A normalized observation vector.
+        """
         day_denominator = max(self.config.episode_length - 1, 1)
+        # Normalize the day index to keep observations within a stable range.
         day_ratio = min(day, self.config.episode_length - 1) / day_denominator
         observation = np.array(
             [

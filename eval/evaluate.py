@@ -9,7 +9,7 @@ import numpy as np
 
 
 class SupportsMaskedActionSelection(Protocol):
-    """Protocol for deterministic masked-action evaluation."""
+    """Protocol for agents supporting masked action selection."""
 
     def select_action(
         self,
@@ -17,11 +17,29 @@ class SupportsMaskedActionSelection(Protocol):
         action_mask: np.ndarray,
         deterministic: bool = False,
     ) -> tuple[int, float, float]:
-        """Selects an action."""
+        """Select an action from the agent policy.
+
+        Args:
+            observation: Current environment observation.
+            action_mask: Binary mask indicating which actions are valid.
+            deterministic: Whether to use deterministic action selection.
+
+        Returns:
+            The selected action, its log probability, and a value estimate.
+        """
 
 
 def evaluate_agent(agent: SupportsMaskedActionSelection, env, episodes: int = 100) -> dict[str, float]:
-    """Evaluates an agent over multiple deterministic episodes."""
+    """Evaluate an agent over multiple deterministic episodes.
+
+    Args:
+        agent: Agent implementing masked action selection.
+        env: Environment used for evaluation.
+        episodes: Number of episodes to evaluate.
+
+    Returns:
+        Mean and population-standard-deviation of episode returns.
+    """
     returns: list[float] = []
     for _ in range(episodes):
         observation, info = env.reset()

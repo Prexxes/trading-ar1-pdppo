@@ -11,7 +11,23 @@ import torch
 
 @dataclass(slots=True)
 class RolloutBuffer:
-    """Stores trajectories and converts them into batched tensors."""
+    """Store trajectories and convert them into batched tensors.
+
+    Attributes:
+        observations: Pre-action observations.
+        next_observations: Observations after environment transitions.
+        post_observations: Post-decision observations for PDPPO.
+        action_masks: Valid-action masks seen at each step.
+        actions: Executed action indices.
+        log_probs: Log probabilities under the behavior policy.
+        rewards: Total transition rewards.
+        post_rewards: Deterministic post-decision reward components.
+        stochastic_rewards: Stochastic reward components from price moves.
+        state_values: State-value estimates.
+        post_values: Post-decision value estimates.
+        dones: Binary terminal flags.
+        truncations: Binary truncation flags.
+    """
 
     observations: list[np.ndarray] = field(default_factory=list)
     next_observations: list[np.ndarray] = field(default_factory=list)
@@ -44,7 +60,23 @@ class RolloutBuffer:
         stochastic_reward: float | None = None,
         post_value: float | None = None,
     ) -> None:
-        """Adds a transition to the buffer."""
+        """Add a transition to the buffer.
+
+        Args:
+            observation: Observation before taking the action.
+            next_observation: Observation after the environment step.
+            action_mask: Binary validity mask for the action space.
+            action: Executed discrete action index.
+            log_prob: Log probability of the executed action.
+            reward: Total reward observed after the step.
+            state_value: Critic estimate for the pre-action observation.
+            done: Whether the transition ended the episode.
+            truncated: Whether the episode ended due to truncation.
+            post_observation: Optional post-decision observation for PDPPO.
+            post_reward: Optional deterministic post-decision reward component.
+            stochastic_reward: Optional stochastic reward component.
+            post_value: Optional post-decision value estimate.
+        """
         self.observations.append(np.asarray(observation, dtype=np.float32))
         self.next_observations.append(np.asarray(next_observation, dtype=np.float32))
         self.action_masks.append(np.asarray(action_mask, dtype=np.int8))
@@ -65,10 +97,18 @@ class RolloutBuffer:
             self.post_values.append(float(post_value))
 
     def __len__(self) -> int:
+        """Return the number of stored transitions."""
         return len(self.actions)
 
     def as_tensors(self, device: torch.device) -> dict[str, torch.Tensor]:
-        """Converts the buffer contents into tensors on the target device."""
+        """Convert the buffer contents into tensors on the target device.
+
+        Args:
+            device: Destination device for the created tensors.
+
+        Returns:
+            A dictionary mapping field names to PyTorch tensors.
+        """
         tensor_map: dict[str, Any] = {
             "observations": np.asarray(self.observations, dtype=np.float32),
             "next_observations": np.asarray(self.next_observations, dtype=np.float32),
@@ -83,6 +123,7 @@ class RolloutBuffer:
 
         if self.post_observations:
             tensor_map["post_observations"] = np.asarray(self.post_observations, dtype=np.float32)
+        # PDPPO-specific fields are added only when they were collected.
         if self.post_rewards:
             tensor_map["post_rewards"] = np.asarray(self.post_rewards, dtype=np.float32)
         if self.stochastic_rewards:
