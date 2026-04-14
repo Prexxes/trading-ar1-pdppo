@@ -200,3 +200,6 @@ __marimo__/
 
 # Experiment test outputs
 test_runs/
+
+# Agent instructions
+AGENTS.md
