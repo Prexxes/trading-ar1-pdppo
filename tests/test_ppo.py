@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from uuid import uuid4
 
@@ -37,12 +38,6 @@ def make_agent(env: TradingAr1Env) -> PPOAgent:
             update_epochs=2,
         )
     )
-
-
-def make_output_dir(name: str) -> Path:
-    output_dir = Path("test_runs") / f"{name}_{uuid4().hex}"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    return output_dir
 
 
 def test_forward_pass_shapes() -> None:
@@ -121,17 +116,23 @@ def test_ppo_smoke_training_runs() -> None:
         update_epochs=1,
     )
 
-    output_dir = make_output_dir("ppo")
-    metrics = train_ppo(
-        env_config,
-        agent_config,
-        total_updates=2,
-        eval_interval=1,
-        eval_episodes=2,
-        output_dir=output_dir,
-        seed=11,
-    )
+    base_temporary_directory = Path("test_runs")
+    base_temporary_directory.mkdir(parents=True, exist_ok=True)
+    output_dir = base_temporary_directory / f"ppo_{uuid4().hex}"
 
-    assert (output_dir / "training_log.csv").exists()
-    assert (output_dir / "checkpoints" / "last.pt").exists()
-    assert "actor_loss" in metrics
+    try:
+        metrics = train_ppo(
+            env_config,
+            agent_config,
+            total_updates=2,
+            eval_interval=1,
+            eval_episodes=2,
+            output_dir=output_dir,
+            seed=11,
+        )
+
+        assert (output_dir / "training_log.csv").exists()
+        assert (output_dir / "checkpoints" / "last.pt").exists()
+        assert "actor_loss" in metrics
+    finally:
+        shutil.rmtree(output_dir, ignore_errors=True)

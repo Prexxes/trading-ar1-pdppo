@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from uuid import uuid4
 
@@ -37,12 +38,6 @@ def make_agent(env: TradingAr1Env) -> PDPPOAgent:
             update_epochs=2,
         )
     )
-
-
-def make_output_dir(name: str) -> Path:
-    output_dir = Path("test_runs") / f"{name}_{uuid4().hex}"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    return output_dir
 
 
 def test_forward_pass_shapes() -> None:
@@ -124,17 +119,23 @@ def test_pdppo_smoke_training_runs() -> None:
         update_epochs=1,
     )
 
-    output_dir = make_output_dir("pdppo")
-    metrics = train_pdppo(
-        env_config,
-        agent_config,
-        total_updates=2,
-        eval_interval=1,
-        eval_episodes=2,
-        output_dir=output_dir,
-        seed=17,
-    )
+    base_temporary_directory = Path("test_runs")
+    base_temporary_directory.mkdir(parents=True, exist_ok=True)
+    output_dir = base_temporary_directory / f"pdppo_{uuid4().hex}"
 
-    assert (output_dir / "training_log.csv").exists()
-    assert (output_dir / "checkpoints" / "last.pt").exists()
-    assert "post_critic_loss" in metrics
+    try:
+        metrics = train_pdppo(
+            env_config,
+            agent_config,
+            total_updates=2,
+            eval_interval=1,
+            eval_episodes=2,
+            output_dir=output_dir,
+            seed=17,
+        )
+
+        assert (output_dir / "training_log.csv").exists()
+        assert (output_dir / "checkpoints" / "last.pt").exists()
+        assert "post_critic_loss" in metrics
+    finally:
+        shutil.rmtree(output_dir, ignore_errors=True)
