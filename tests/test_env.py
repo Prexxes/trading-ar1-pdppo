@@ -15,7 +15,7 @@ def make_env(**overrides) -> TradingAr1Env:
         "initial_inventory": 1,
         "max_inventory": 4,
         "initial_price": 10.0,
-        "sigma": 0.0,
+        "sigma": 0.0,  # No noise
         "phi": 1.0,
         "seed": 123,
     }
@@ -42,6 +42,7 @@ def test_step_is_gymnasium_compatible() -> None:
 
 
 def test_constraints_hold_across_steps() -> None:
+    # Buy up to the max_inventory, then hold
     env = make_env(post_reward_mode="cash_interest_and_tc")
     observation, info = env.reset()
     action_mask = info["action_mask"]
@@ -60,6 +61,7 @@ def test_constraints_hold_across_steps() -> None:
 
 
 def test_action_mask_respects_cash_inventory_and_trade_cap() -> None:
+    # Can not buy anything, just hold
     env = make_env(initial_cash=5.0, initial_inventory=0, max_trade_per_day=1)
     _, info = env.reset()
     mask = info["action_mask"]
@@ -94,7 +96,7 @@ def test_post_decision_state_matches_expected_and_does_not_mutate() -> None:
     env = make_env(post_reward_mode="cash_interest_and_tc")
     env.reset()
     original_state = (env.day, env.inventory, env.cash, env.price, env.log_price)
-    action = env.config.max_inventory + 1
+    action = env.config.max_inventory + 1  # Buy one
     post_observation, post_reward = env.get_post_decision_state(action)
 
     expected_trade = 1
@@ -128,3 +130,132 @@ def test_initial_price_and_mu_are_interpreted_as_price_levels() -> None:
     env.step(env.config.max_inventory)
     assert np.isclose(env.log_price, np.log(20.0))
     assert np.isclose(env.price, 20.0)
+
+
+def test_price_path_is_reproducible_with_fixed_seed() -> None:
+    env_a = TradingAr1Env(
+        TradingAr1EnvConfig(
+            episode_length=5,
+            initial_cash=100.0,
+            initial_inventory=0,
+            max_inventory=4,
+            initial_price=10.0,
+            mu=10.0,
+            phi=0.8,
+            sigma=0.05,
+            seed=123,
+        )
+    )
+    env_b = TradingAr1Env(
+        TradingAr1EnvConfig(
+            episode_length=5,
+            initial_cash=100.0,
+            initial_inventory=0,
+            max_inventory=4,
+            initial_price=10.0,
+            mu=10.0,
+            phi=0.8,
+            sigma=0.05,
+            seed=123,
+        )
+    )
+
+    env_a.reset()
+    env_b.reset()
+
+    prices_a = [env_a.price]
+    prices_b = [env_b.price]
+
+    hold_action = env_a.config.max_inventory
+    for _ in range(4):
+        env_a.step(hold_action)
+        env_b.step(hold_action)
+        prices_a.append(env_a.price)
+        prices_b.append(env_b.price)
+
+    assert np.allclose(prices_a, prices_b)
+
+
+def test_price_changes_when_sigma_is_positive() -> None:
+    env = make_env(
+        initial_price=10.0,
+        mu=10.0,
+        phi=1.0,
+        sigma=0.05,
+        seed=7,
+    )
+    env.reset()
+
+    initial_price = env.price
+    hold_action = env.config.max_inventory
+    env.step(hold_action)
+
+    assert not np.isclose(env.price, initial_price)
+    assert env.price > 0.0
+
+
+def test_stochastic_reward_matches_price_change_when_sigma_positive() -> None:
+    env = make_env(
+        initial_price=10.0,
+        mu=10.0,
+        phi=0.9,
+        sigma=0.05,
+        initial_inventory=2,
+        seed=21,
+    )
+    env.reset()
+
+    old_price = env.price
+    old_inventory = env.inventory
+    hold_action = env.config.max_inventory
+
+    _, _, _, _, info = env.step(hold_action)
+
+    expected_stochastic_reward = old_inventory * (env.price - old_price)
+
+    assert np.isclose(info["stochastic_reward"], expected_stochastic_reward)
+    assert env.price > 0.0
+
+
+def test_larger_sigma_creates_larger_log_price_dispersion() -> None:
+    env_small = TradingAr1Env(
+        TradingAr1EnvConfig(
+            episode_length=200,
+            initial_cash=100.0,
+            initial_inventory=0,
+            max_inventory=4,
+            initial_price=10.0,
+            mu=10.0,
+            phi=1.0,
+            sigma=0.01,
+            seed=5,
+        )
+    )
+    env_large = TradingAr1Env(
+        TradingAr1EnvConfig(
+            episode_length=200,
+            initial_cash=100.0,
+            initial_inventory=0,
+            max_inventory=4,
+            initial_price=10.0,
+            mu=10.0,
+            phi=1.0,
+            sigma=0.10,
+            seed=5,
+        )
+    )
+
+    env_small.reset()
+    env_large.reset()
+
+    hold_action = env_small.config.max_inventory
+    log_prices_small = []
+    log_prices_large = []
+
+    for _ in range(100):
+        env_small.step(hold_action)
+        env_large.step(hold_action)
+        log_prices_small.append(env_small.log_price)
+        log_prices_large.append(env_large.log_price)
+
+    assert np.std(log_prices_large) > np.std(log_prices_small)
