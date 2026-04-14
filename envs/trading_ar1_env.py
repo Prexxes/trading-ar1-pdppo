@@ -22,9 +22,8 @@ class TradingAr1EnvConfig:
         initial_inventory: Initial number of units held.
         max_inventory: Maximum allowed inventory level.
         max_trade_per_day: Optional cap on absolute daily trade size.
-        initial_price: Initial price when ``initial_log_price`` is not provided.
-        initial_log_price: Optional initial log-price overriding ``initial_price``.
-        mu: Long-run mean of the AR(1) log-price process.
+        initial_price: Initial asset price used to initialize the log-price state.
+        mu: Long-run mean price level of the AR(1) process.
         phi: Persistence of the AR(1) log-price process.
         sigma: Innovation standard deviation of the AR(1) process.
         post_reward_mode: Reward decomposition mode.
@@ -39,8 +38,7 @@ class TradingAr1EnvConfig:
     max_inventory: int = 20
     max_trade_per_day: int | None = None
     initial_price: float = 50.0
-    initial_log_price: float | None = None
-    mu: float = float(np.log(50.0))
+    mu: float = 50.0
     phi: float = 0.98
     sigma: float = 0.02
     post_reward_mode: PostRewardMode = "none"
@@ -81,12 +79,13 @@ class TradingAr1Env(gym.Env[np.ndarray, int]):
 
     @property
     def _initial_log_price(self) -> float:
-        """Return the initial log-price implied by the configuration."""
-        return (
-            float(self.config.initial_log_price)
-            if self.config.initial_log_price is not None
-            else float(np.log(self.config.initial_price))
-        )
+        """Return the initial log-price implied by ``initial_price``."""
+        return float(np.log(self.config.initial_price))
+
+    @property
+    def _log_mu(self) -> float:
+        """Return the long-run log-price implied by the configured mean price."""
+        return float(np.log(self.config.mu))
 
     @property
     def daily_risk_free_rate(self) -> float:
@@ -107,8 +106,10 @@ class TradingAr1Env(gym.Env[np.ndarray, int]):
             raise ValueError("max_inventory must be positive.")
         if not 0 <= self.config.initial_inventory <= self.config.max_inventory:
             raise ValueError("initial_inventory must be within [0, max_inventory].")
-        if self.config.initial_price <= 0.0 and self.config.initial_log_price is None:
+        if self.config.initial_price <= 0.0:
             raise ValueError("initial_price must be positive.")
+        if self.config.mu <= 0.0:
+            raise ValueError("mu must be positive.")
         if self.config.max_trade_per_day is not None and self.config.max_trade_per_day < 0:
             raise ValueError("max_trade_per_day must be non-negative.")
 
@@ -268,9 +269,10 @@ class TradingAr1Env(gym.Env[np.ndarray, int]):
             The next sampled log-price.
         """
         epsilon = self.np_random.normal()
+        log_mu = self._log_mu
         return float(
-            self.config.mu
-            + self.config.phi * (current_log_price - self.config.mu)
+            log_mu
+            + self.config.phi * (current_log_price - log_mu)
             + self.config.sigma * epsilon
         )
 

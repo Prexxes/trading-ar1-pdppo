@@ -116,3 +116,15 @@ def test_reward_decomposition_is_exposed() -> None:
     _, reward, _, _, info = env.step(env.config.max_inventory + 1)
 
     assert np.isclose(reward, info["post_reward"] + info["stochastic_reward"])
+
+
+def test_initial_price_and_mu_are_interpreted_as_price_levels() -> None:
+    env = make_env(initial_price=40.0, mu=20.0, sigma=0.0, phi=0.0)
+    observation, info = env.reset()
+
+    assert np.isclose(env.log_price, np.log(40.0))
+    assert np.isclose(info["price"], 40.0)
+
+    env.step(env.config.max_inventory)
+    assert np.isclose(env.log_price, np.log(20.0))
+    assert np.isclose(env.price, 20.0)
