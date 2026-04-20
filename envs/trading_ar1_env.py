@@ -243,7 +243,8 @@ class TradingAr1Env(gym.Env[np.ndarray, int]):
             action_index: Encoded trade action.
 
         Returns:
-            The post-decision observation and deterministic post-decision reward.
+            The post-decision observation after deterministic cash effects and
+            deterministic post-decision reward.
         """
         requested_trade = self._decode_action(int(action_index))
         is_valid = self._is_valid_trade(requested_trade, self.inventory, self.cash, self.price)
@@ -251,10 +252,14 @@ class TradingAr1Env(gym.Env[np.ndarray, int]):
         transaction_cost = self._transaction_cost(executed_trade, self.price)
         post_cash = self._cash_after_trade(self.cash, executed_trade, self.price, transaction_cost)
         post_inventory = self.inventory + executed_trade
+        cash_interest = 0.0
+        if self.config.post_reward_mode in {"cash_interest", "cash_interest_and_tc"}:
+            cash_interest = post_cash * self.daily_risk_free_rate
+        post_cash_with_interest = post_cash + cash_interest
         post_observation = self._get_observation(
             log_price=self.log_price,
             inventory=post_inventory,
-            cash=post_cash,
+            cash=post_cash_with_interest,
             day=self.day,
         )
         return post_observation, self._compute_post_reward(post_cash, transaction_cost)

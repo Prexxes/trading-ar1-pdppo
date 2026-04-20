@@ -102,9 +102,10 @@ def test_post_decision_state_matches_expected_and_does_not_mutate() -> None:
     expected_trade = 1
     transaction_cost = env.config.transaction_cost_rate * expected_trade * env.price
     expected_cash = env.config.initial_cash - expected_trade * env.price - transaction_cost
+    expected_cash_with_interest = expected_cash + expected_cash * env.daily_risk_free_rate
 
     assert np.isclose(post_observation[1], (env.config.initial_inventory + 1) / env.config.max_inventory)
-    assert np.isclose(post_observation[2], expected_cash / env.config.initial_cash)
+    assert np.isclose(post_observation[2], expected_cash_with_interest / env.config.initial_cash)
     assert np.isclose(
         post_reward,
         -transaction_cost + expected_cash * env.daily_risk_free_rate,
