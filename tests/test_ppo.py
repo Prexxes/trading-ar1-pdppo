@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import json
 from pathlib import Path
 from uuid import uuid4
 
@@ -132,6 +133,15 @@ def test_ppo_smoke_training_runs() -> None:
         )
 
         assert (output_dir / "training_log.csv").exists()
+        metadata_path = output_dir / "run_metadata.json"
+        assert metadata_path.exists()
+        with metadata_path.open(encoding="utf-8") as handle:
+            metadata = json.load(handle)
+        assert metadata["algorithm"] == "PPO"
+        assert metadata["environment_config"]["episode_length"] == env_config.episode_length
+        assert metadata["agent_config"]["rollout_steps"] == agent_config.rollout_steps
+        assert metadata["training_config"]["total_updates"] == 2
+        assert metadata["duration"]["seconds"] >= 0.0
         assert (output_dir / "checkpoints" / "last.pt").exists()
         assert "actor_loss" in metrics
     finally:

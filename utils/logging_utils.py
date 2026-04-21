@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 from typing import Iterable, Mapping
 
@@ -34,3 +35,15 @@ def append_csv_row(path: Path, fieldnames: Iterable[str], row: Mapping[str, obje
         if not file_exists:
             writer.writeheader()
         writer.writerow(row)
+
+
+def write_json(path: Path, data: Mapping[str, object]) -> None:
+    """Write structured data to a JSON file.
+
+    Args:
+        path: Target JSON file path.
+        data: Mapping containing JSON-serializable values.
+    """
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump(data, handle, indent=2)
+        handle.write("\n")

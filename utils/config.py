@@ -14,8 +14,10 @@ class TrainingPaths:
         root: Root directory for the training run.
         checkpoint_dir: Directory containing model checkpoints.
         log_csv: CSV file used for metric logging.
+        metadata_json: JSON file used for run-level metadata.
     """
 
     root: Path
     checkpoint_dir: Path
     log_csv: Path
+    metadata_json: Path

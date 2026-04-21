@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 
 from agents.pdppo_agent import PDPPOAgent, PDPPOConfig
 from envs.trading_ar1_env import TradingAr1Env, TradingAr1EnvConfig
 from eval.evaluate import evaluate_agent
-from train.train_ppo import create_training_paths
-from utils.logging_utils import append_csv_row
+from train.train_ppo import build_run_metadata, create_training_paths
+from utils.logging_utils import append_csv_row, write_json
 from utils.seeding import seed_everything
 
 
@@ -37,6 +39,8 @@ def train_pdppo(
     Returns:
         Metrics collected during the final training update.
     """
+    started_at = datetime.now().astimezone()
+    started_time = perf_counter()
     seed_everything(seed)
     train_env = TradingAr1Env(env_config)
     eval_env = TradingAr1Env(env_config)
@@ -85,6 +89,21 @@ def train_pdppo(
         agent.save(paths.checkpoint_dir / "last.pt")
         append_csv_row(paths.log_csv, fieldnames, metrics)
         final_metrics = metrics
+
+    finished_at = datetime.now().astimezone()
+    metadata = build_run_metadata(
+        algorithm="PDPPO",
+        started_at=started_at,
+        finished_at=finished_at,
+        duration_seconds=perf_counter() - started_time,
+        env_config=env_config,
+        agent_config=agent_config,
+        total_updates=total_updates,
+        eval_interval=eval_interval,
+        eval_episodes=eval_episodes,
+        seed=seed,
+    )
+    write_json(paths.metadata_json, metadata)
 
     return final_metrics
 
